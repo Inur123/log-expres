@@ -173,6 +173,64 @@ export async function getLogs(req: Request, res: Response) {
   });
 }
 
+export async function getLogById(req: Request, res: Response) {
+  // User sudah di-authenticate oleh JWT middleware
+  const user = (req as AuthRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({ success: false, message: "Authentication required" });
+  }
+
+  const { id } = req.params;
+
+  const log = await prisma.unifiedLog.findUnique({
+    where: { id },
+    select: {
+      id: true,
+      seq: true,
+      logType: true,
+      payload: true,
+      hash: true,
+      prevHash: true,
+      ipAddress: true,
+      userAgent: true,
+      createdAt: true,
+      application: {
+        select: {
+          id: true,
+          name: true,
+          slug: true,
+          domain: true,
+          stack: true,
+        },
+      },
+    },
+  });
+
+  if (!log) {
+    return res.status(404).json({ 
+      success: false, 
+      message: "Log not found" 
+    });
+  }
+
+  return res.json({
+    success: true,
+    data: {
+      id: log.id,
+      seq: log.seq.toString(),
+      log_type: log.logType,
+      payload: log.payload,
+      hash: log.hash,
+      prev_hash: log.prevHash,
+      ip_address: log.ipAddress,
+      user_agent: log.userAgent,
+      created_at: log.createdAt,
+      application: log.application,
+    },
+  });
+}
+
 export async function verifyChain(req: Request, res: Response) {
   // User sudah di-authenticate oleh JWT middleware
   const user = (req as AuthRequest).user;
