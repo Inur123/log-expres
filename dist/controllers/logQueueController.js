@@ -3,18 +3,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.storeWithQueue = storeWithQueue;
 const logValidators_1 = require("../validators/logValidators");
 const logQueue_1 = require("../queues/logQueue");
-const apiKey_1 = require("../utils/apiKey");
-const prismaClient_1 = require("../prismaClient");
 async function storeWithQueue(req, res) {
-    const apiKey = (0, apiKey_1.getApiKey)(req);
-    if (!apiKey)
+    // Application sudah di-attach oleh requireApiKey middleware
+    const application = req.application;
+    if (!application) {
         return res.status(401).json({ success: false, message: "API Key is required" });
-    const application = await prismaClient_1.prisma.application.findFirst({
-        where: { apiKey, isActive: true },
-        select: { id: true },
-    });
-    if (!application)
-        return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+    }
     const parsed = logValidators_1.baseLogSchema.safeParse({ log_type: req.body?.log_type, payload: req.body?.payload });
     const originalLogType = req.body?.log_type ? String(req.body.log_type).toUpperCase() : "UNKNOWN";
     if (!parsed.success) {

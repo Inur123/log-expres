@@ -1,19 +1,15 @@
 import { Request, Response } from "express";
 import { baseLogSchema, isAllowedLogType } from "../validators/logValidators";
 import { logQueue } from "../queues/logQueue";
-import { getApiKey } from "../utils/apiKey";
-import { prisma } from "../prismaClient";
+import { ApiKeyRequest } from "../middlewares/apiKeyMiddleware";
 
 export async function storeWithQueue(req: Request, res: Response) {
-  const apiKey = getApiKey(req);
-  if (!apiKey) return res.status(401).json({ success: false, message: "API Key is required" });
-
-  const application = await prisma.application.findFirst({
-    where: { apiKey, isActive: true },
-    select: { id: true },
-  });
-
-  if (!application) return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+  // Application sudah di-attach oleh requireApiKey middleware
+  const application = (req as ApiKeyRequest).application;
+  
+  if (!application) {
+    return res.status(401).json({ success: false, message: "API Key is required" });
+  }
 
   const parsed = baseLogSchema.safeParse({ log_type: req.body?.log_type, payload: req.body?.payload });
   const originalLogType = req.body?.log_type ? String(req.body.log_type).toUpperCase() : "UNKNOWN";

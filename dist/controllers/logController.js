@@ -10,18 +10,13 @@ const crypto_1 = __importDefault(require("crypto"));
 const prismaClient_1 = require("../prismaClient");
 const logValidators_1 = require("../validators/logValidators");
 const hashChainService_1 = require("../services/hashChainService");
-const apiKey_1 = require("../utils/apiKey");
 const hashSvc = new hashChainService_1.HashChainService();
 async function store(req, res) {
-    const apiKey = (0, apiKey_1.getApiKey)(req);
-    if (!apiKey)
+    // Application sudah di-attach oleh requireApiKey middleware
+    const application = req.application;
+    if (!application) {
         return res.status(401).json({ success: false, message: "API Key is required" });
-    const application = await prismaClient_1.prisma.application.findFirst({
-        where: { apiKey, isActive: true },
-        select: { id: true },
-    });
-    if (!application)
-        return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+    }
     const parsed = logValidators_1.baseLogSchema.safeParse({ log_type: req.body?.log_type, payload: req.body?.payload });
     const originalLogType = req.body?.log_type ? String(req.body.log_type).toUpperCase() : "UNKNOWN";
     if (!parsed.success) {
@@ -85,24 +80,25 @@ async function store(req, res) {
     });
 }
 async function getLogs(req, res) {
-    const apiKey = (0, apiKey_1.getApiKey)(req);
-    if (!apiKey)
-        return res.status(401).json({ success: false, message: "API Key is required" });
-    const application = await prismaClient_1.prisma.application.findFirst({
-        where: { apiKey, isActive: true },
-        select: { id: true },
-    });
-    if (!application)
-        return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+    // User sudah di-authenticate oleh JWT middleware
+    const user = req.user;
+    if (!user) {
+        return res.status(401).json({ success: false, message: "Authentication required" });
+    }
     // Pagination params
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(100, Math.max(1, parseInt(req.query.limit) || 20));
     const skip = (page - 1) * limit;
     // Filter params
+    const applicationId = req.query.application_id;
     const logType = req.query.log_type;
     const startSeq = req.query.start_seq ? BigInt(req.query.start_seq) : undefined;
     const endSeq = req.query.end_seq ? BigInt(req.query.end_seq) : undefined;
-    const where = { applicationId: application.id };
+    const where = {};
+    // Filter by application if specified
+    if (applicationId) {
+        where.applicationId = applicationId;
+    }
     if (logType)
         where.logType = logType.toUpperCase();
     if (startSeq || endSeq) {
@@ -129,6 +125,13 @@ async function getLogs(req, res) {
                 ipAddress: true,
                 userAgent: true,
                 createdAt: true,
+                application: {
+                    select: {
+                        id: true,
+                        name: true,
+                        slug: true,
+                    },
+                },
             },
         }),
     ]);
@@ -144,6 +147,7 @@ async function getLogs(req, res) {
             ip_address: log.ipAddress,
             user_agent: log.userAgent,
             created_at: log.createdAt,
+            application: log.application,
         })),
         pagination: {
             page,
@@ -154,28 +158,58 @@ async function getLogs(req, res) {
     });
 }
 async function verifyChain(req, res) {
-    const apiKey = (0, apiKey_1.getApiKey)(req);
-    if (!apiKey)
-        return res.status(401).json({ success: false, message: "API Key is required" });
-    const application = await prismaClient_1.prisma.application.findFirst({
-        where: { apiKey, isActive: true },
-        select: { id: true, name: true },
-    });
-    if (!application)
-        return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+    // User sudah di-authenticate oleh JWT middleware
+    const user = req.user;
+    if (!user) {
+        return res.status(401).json({ success: false, message: "Authentication required" });
+    }
     const secret = process.env.LOG_HASH_KEY;
     if (!secret)
         return res.status(500).json({ success: false, message: "LOG_HASH_KEY missing" });
-    const result = await hashSvc.verifyHashChain(application.id, secret, prismaClient_1.prisma);
-    return res.json({
-        success: true,
-        data: {
-            application_id: application.id,
-            application_name: application.name,
-            valid: result.valid,
-            total_logs: result.totalLogs,
-            first_invalid_seq: result.firstInvalidSeq?.toString(),
-            errors: result.errors,
-        },
-    });
+    // Optional: filter by application_id dari query
+    const applicationId = req.query.application_id;
+    if (applicationId) {
+        // Verify specific application
+        const application = await prismaClient_1.prisma.application.findUnique({
+            where: { id: applicationId },
+            select: { id: true, name: true, isActive: true },
+        });
+        if (!application) {
+            return res.status(404).json({ success: false, message: "Application not found" });
+        }
+        const result = await hashSvc.verifyHashChain(application.id, secret, prismaClient_1.prisma);
+        return res.json({
+            success: true,
+            data: {
+                application_id: application.id,
+                application_name: application.name,
+                valid: result.valid,
+                total_logs: result.totalLogs,
+                first_invalid_seq: result.firstInvalidSeq?.toString(),
+                errors: result.errors,
+            },
+        });
+    }
+    else {
+        // Verify all applications
+        const applications = await prismaClient_1.prisma.application.findMany({
+            where: { isActive: true },
+            select: { id: true, name: true },
+        });
+        const results = await Promise.all(applications.map(async (app) => {
+            const result = await hashSvc.verifyHashChain(app.id, secret, prismaClient_1.prisma);
+            return {
+                application_id: app.id,
+                application_name: app.name,
+                valid: result.valid,
+                total_logs: result.totalLogs,
+                first_invalid_seq: result.firstInvalidSeq?.toString(),
+                errors: result.errors,
+            };
+        }));
+        return res.json({
+            success: true,
+            data: results,
+        });
+    }
 }

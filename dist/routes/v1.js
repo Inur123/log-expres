@@ -7,6 +7,7 @@ const applicationController_1 = require("../controllers/applicationController");
 const authController_1 = require("../controllers/authController");
 const authMiddleware_1 = require("../middlewares/authMiddleware");
 const rbacMiddleware_1 = require("../middlewares/rbacMiddleware");
+const apiKeyMiddleware_1 = require("../middlewares/apiKeyMiddleware");
 const r = (0, express_1.Router)();
 // ============================================
 // PUBLIC ROUTES - No Authentication Required
@@ -179,6 +180,138 @@ r.post("/applications", authMiddleware_1.authenticate, rbacMiddleware_1.requireS
  *                   items: { $ref: '#/components/schemas/Application' }
  */
 r.get("/applications", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, applicationController_1.getApplications);
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   get:
+ *     tags: [Applications]
+ *     summary: Get application by ID (Auditor & Super Admin)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application retrieved
+ *       404:
+ *         description: Application not found
+ */
+r.get("/applications/:id", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, applicationController_1.getApplicationById);
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   put:
+ *     tags: [Applications]
+ *     summary: Update application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string, example: "Updated App Name" }
+ *               domain: { type: string, example: "newdomain.com" }
+ *               stack: { type: string, example: "python" }
+ *               isActive: { type: boolean, example: true }
+ *     responses:
+ *       200:
+ *         description: Application updated
+ *       404:
+ *         description: Application not found
+ */
+r.put("/applications/:id", authMiddleware_1.authenticate, rbacMiddleware_1.requireSuperAdmin, applicationController_1.updateApplication);
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   delete:
+ *     tags: [Applications]
+ *     summary: Soft delete application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application deleted (soft delete)
+ *       404:
+ *         description: Application not found
+ */
+r.delete("/applications/:id", authMiddleware_1.authenticate, rbacMiddleware_1.requireSuperAdmin, applicationController_1.deleteApplication);
+/**
+ * @openapi
+ * /api/v1/applications/{id}/hard-delete:
+ *   delete:
+ *     tags: [Applications]
+ *     summary: Permanently delete application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application permanently deleted
+ *       400:
+ *         description: Cannot delete application with logs
+ *       404:
+ *         description: Application not found
+ */
+r.delete("/applications/:id/hard-delete", authMiddleware_1.authenticate, rbacMiddleware_1.requireSuperAdmin, applicationController_1.hardDeleteApplication);
+/**
+ * @openapi
+ * /api/v1/applications/{id}/regenerate-key:
+ *   post:
+ *     tags: [Applications]
+ *     summary: Regenerate API Key (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: API Key regenerated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string }
+ *                     name: { type: string }
+ *                     slug: { type: string }
+ *                     apiKey: { type: string }
+ *       404:
+ *         description: Application not found
+ */
+r.post("/applications/:id/regenerate-key", authMiddleware_1.authenticate, rbacMiddleware_1.requireSuperAdmin, applicationController_1.regenerateApiKey);
 // ============================================
 // LOG ENDPOINTS - Require API Key (for external apps)
 // ============================================
@@ -187,7 +320,7 @@ r.get("/applications", authMiddleware_1.authenticate, rbacMiddleware_1.requireAu
  * /api/v1/logs:
  *   post:
  *     tags: [Logs]
- *     summary: Store log (synchronous)
+ *     summary: Store log (synchronous) - Requires API Key
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -223,15 +356,15 @@ r.get("/applications", authMiddleware_1.authenticate, rbacMiddleware_1.requireAu
  *                     created_at: { type: string, format: date-time }
  *                     log_type: { type: string }
  */
-r.post("/logs", logController_1.store);
+r.post("/logs", apiKeyMiddleware_1.requireApiKey, logController_1.store);
 /**
  * @openapi
  * /api/v1/logs:
  *   get:
  *     tags: [Logs]
- *     summary: Get logs with pagination
+ *     summary: Get logs with pagination - Requires JWT Token
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: query
  *         name: page
@@ -248,6 +381,10 @@ r.post("/logs", logController_1.store);
  *       - in: query
  *         name: end_seq
  *         schema: { type: string }
+ *       - in: query
+ *         name: application_id
+ *         schema: { type: string }
+ *         description: Filter by application ID (optional)
  *     responses:
  *       200:
  *         description: Logs retrieved
@@ -268,15 +405,20 @@ r.post("/logs", logController_1.store);
  *                     total: { type: integer }
  *                     total_pages: { type: integer }
  */
-r.get("/logs", logController_1.getLogs);
+r.get("/logs", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, logController_1.getLogs);
 /**
  * @openapi
  * /api/v1/logs/verify-chain:
  *   get:
  *     tags: [Logs]
- *     summary: Verify hash chain integrity
+ *     summary: Verify hash chain integrity - Requires JWT Token
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: application_id
+ *         schema: { type: string }
+ *         description: Application ID to verify (optional, will verify all if not provided)
  *     responses:
  *       200:
  *         description: Chain verification result
@@ -296,13 +438,13 @@ r.get("/logs", logController_1.getLogs);
  *                     first_invalid_seq: { type: string }
  *                     errors: { type: array, items: { type: string } }
  */
-r.get("/logs/verify-chain", logController_1.verifyChain);
+r.get("/logs/verify-chain", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, logController_1.verifyChain);
 /**
  * @openapi
  * /api/v1/logs/queue:
  *   post:
  *     tags: [Logs]
- *     summary: Store log (asynchronous with queue)
+ *     summary: Store log (asynchronous with queue) - Requires API Key
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -332,5 +474,5 @@ r.get("/logs/verify-chain", logController_1.verifyChain);
  *                     log_type: { type: string }
  *                     status: { type: string, example: queued }
  */
-r.post("/logs/queue", logQueueController_1.storeWithQueue);
+r.post("/logs/queue", apiKeyMiddleware_1.requireApiKey, logQueueController_1.storeWithQueue);
 exports.default = r;

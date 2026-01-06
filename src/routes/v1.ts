@@ -1,10 +1,19 @@
 import { Router } from "express";
 import { store, getLogs, verifyChain } from "../controllers/logController";
 import { storeWithQueue } from "../controllers/logQueueController";
-import { createApplication, getApplications } from "../controllers/applicationController";
+import { 
+  createApplication, 
+  getApplications, 
+  getApplicationById,
+  updateApplication,
+  deleteApplication,
+  hardDeleteApplication,
+  regenerateApiKey
+} from "../controllers/applicationController";
 import { register, login, logout, getProfile } from "../controllers/authController";
 import { authenticate } from "../middlewares/authMiddleware";
 import { requireSuperAdmin, requireAuditorOrAdmin } from "../middlewares/rbacMiddleware";
+import { requireApiKey } from "../middlewares/apiKeyMiddleware";
 
 const r = Router();
 
@@ -188,6 +197,143 @@ r.post("/applications", authenticate, requireSuperAdmin, createApplication);
  */
 r.get("/applications", authenticate, requireAuditorOrAdmin, getApplications);
 
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   get:
+ *     tags: [Applications]
+ *     summary: Get application by ID (Auditor & Super Admin)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application retrieved
+ *       404:
+ *         description: Application not found
+ */
+r.get("/applications/:id", authenticate, requireAuditorOrAdmin, getApplicationById);
+
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   put:
+ *     tags: [Applications]
+ *     summary: Update application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string, example: "Updated App Name" }
+ *               domain: { type: string, example: "newdomain.com" }
+ *               stack: { type: string, example: "python" }
+ *               isActive: { type: boolean, example: true }
+ *     responses:
+ *       200:
+ *         description: Application updated
+ *       404:
+ *         description: Application not found
+ */
+r.put("/applications/:id", authenticate, requireSuperAdmin, updateApplication);
+
+/**
+ * @openapi
+ * /api/v1/applications/{id}:
+ *   delete:
+ *     tags: [Applications]
+ *     summary: Soft delete application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application deleted (soft delete)
+ *       404:
+ *         description: Application not found
+ */
+r.delete("/applications/:id", authenticate, requireSuperAdmin, deleteApplication);
+
+/**
+ * @openapi
+ * /api/v1/applications/{id}/hard-delete:
+ *   delete:
+ *     tags: [Applications]
+ *     summary: Permanently delete application (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: Application permanently deleted
+ *       400:
+ *         description: Cannot delete application with logs
+ *       404:
+ *         description: Application not found
+ */
+r.delete("/applications/:id/hard-delete", authenticate, requireSuperAdmin, hardDeleteApplication);
+
+/**
+ * @openapi
+ * /api/v1/applications/{id}/regenerate-key:
+ *   post:
+ *     tags: [Applications]
+ *     summary: Regenerate API Key (Super Admin only)
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Application ID
+ *     responses:
+ *       200:
+ *         description: API Key regenerated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 message: { type: string }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string }
+ *                     name: { type: string }
+ *                     slug: { type: string }
+ *                     apiKey: { type: string }
+ *       404:
+ *         description: Application not found
+ */
+r.post("/applications/:id/regenerate-key", authenticate, requireSuperAdmin, regenerateApiKey);
+
 // ============================================
 // LOG ENDPOINTS - Require API Key (for external apps)
 // ============================================
@@ -197,7 +343,7 @@ r.get("/applications", authenticate, requireAuditorOrAdmin, getApplications);
  * /api/v1/logs:
  *   post:
  *     tags: [Logs]
- *     summary: Store log (synchronous)
+ *     summary: Store log (synchronous) - Requires API Key
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -233,16 +379,16 @@ r.get("/applications", authenticate, requireAuditorOrAdmin, getApplications);
  *                     created_at: { type: string, format: date-time }
  *                     log_type: { type: string }
  */
-r.post("/logs", store);
+r.post("/logs", requireApiKey, store);
 
 /**
  * @openapi
  * /api/v1/logs:
  *   get:
  *     tags: [Logs]
- *     summary: Get logs with pagination
+ *     summary: Get logs with pagination - Requires JWT Token
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
  *     parameters:
  *       - in: query
  *         name: page
@@ -259,6 +405,10 @@ r.post("/logs", store);
  *       - in: query
  *         name: end_seq
  *         schema: { type: string }
+ *       - in: query
+ *         name: application_id
+ *         schema: { type: string }
+ *         description: Filter by application ID (optional)
  *     responses:
  *       200:
  *         description: Logs retrieved
@@ -279,16 +429,21 @@ r.post("/logs", store);
  *                     total: { type: integer }
  *                     total_pages: { type: integer }
  */
-r.get("/logs", getLogs);
+r.get("/logs", authenticate, requireAuditorOrAdmin, getLogs);
 
 /**
  * @openapi
  * /api/v1/logs/verify-chain:
  *   get:
  *     tags: [Logs]
- *     summary: Verify hash chain integrity
+ *     summary: Verify hash chain integrity - Requires JWT Token
  *     security:
- *       - ApiKeyAuth: []
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: application_id
+ *         schema: { type: string }
+ *         description: Application ID to verify (optional, will verify all if not provided)
  *     responses:
  *       200:
  *         description: Chain verification result
@@ -308,14 +463,14 @@ r.get("/logs", getLogs);
  *                     first_invalid_seq: { type: string }
  *                     errors: { type: array, items: { type: string } }
  */
-r.get("/logs/verify-chain", verifyChain);
+r.get("/logs/verify-chain", authenticate, requireAuditorOrAdmin, verifyChain);
 
 /**
  * @openapi
  * /api/v1/logs/queue:
  *   post:
  *     tags: [Logs]
- *     summary: Store log (asynchronous with queue)
+ *     summary: Store log (asynchronous with queue) - Requires API Key
  *     security:
  *       - ApiKeyAuth: []
  *     requestBody:
@@ -345,6 +500,6 @@ r.get("/logs/verify-chain", verifyChain);
  *                     log_type: { type: string }
  *                     status: { type: string, example: queued }
  */
-r.post("/logs/queue", storeWithQueue);
+r.post("/logs/queue", requireApiKey, storeWithQueue);
 
 export default r;

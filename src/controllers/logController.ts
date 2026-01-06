@@ -3,20 +3,18 @@ import { Request, Response } from "express";
 import { prisma } from "../prismaClient";
 import { baseLogSchema, isAllowedLogType } from "../validators/logValidators";
 import { HashChainService } from "../services/hashChainService";
-import { getApiKey } from "../utils/apiKey";
+import { ApiKeyRequest } from "../middlewares/apiKeyMiddleware";
+import { AuthRequest } from "../middlewares/authMiddleware";
 
 const hashSvc = new HashChainService();
 
 export async function store(req: Request, res: Response) {
-  const apiKey = getApiKey(req);
-  if (!apiKey) return res.status(401).json({ success: false, message: "API Key is required" });
-
-  const application = await prisma.application.findFirst({
-    where: { apiKey, isActive: true },
-    select: { id: true },
-  });
-
-  if (!application) return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+  // Application sudah di-attach oleh requireApiKey middleware
+  const application = (req as ApiKeyRequest).application;
+  
+  if (!application) {
+    return res.status(401).json({ success: false, message: "API Key is required" });
+  }
 
   const parsed = baseLogSchema.safeParse({ log_type: req.body?.log_type, payload: req.body?.payload });
   const originalLogType = req.body?.log_type ? String(req.body.log_type).toUpperCase() : "UNKNOWN";
@@ -92,15 +90,12 @@ export async function store(req: Request, res: Response) {
 }
 
 export async function getLogs(req: Request, res: Response) {
-  const apiKey = getApiKey(req);
-  if (!apiKey) return res.status(401).json({ success: false, message: "API Key is required" });
-
-  const application = await prisma.application.findFirst({
-    where: { apiKey, isActive: true },
-    select: { id: true },
-  });
-
-  if (!application) return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+  // User sudah di-authenticate oleh JWT middleware
+  const user = (req as AuthRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({ success: false, message: "Authentication required" });
+  }
 
   // Pagination params
   const page = Math.max(1, parseInt(req.query.page as string) || 1);
@@ -108,11 +103,18 @@ export async function getLogs(req: Request, res: Response) {
   const skip = (page - 1) * limit;
 
   // Filter params
+  const applicationId = req.query.application_id as string | undefined;
   const logType = req.query.log_type as string | undefined;
   const startSeq = req.query.start_seq ? BigInt(req.query.start_seq as string) : undefined;
   const endSeq = req.query.end_seq ? BigInt(req.query.end_seq as string) : undefined;
 
-  const where: any = { applicationId: application.id };
+  const where: any = {};
+  
+  // Filter by application if specified
+  if (applicationId) {
+    where.applicationId = applicationId;
+  }
+  
   if (logType) where.logType = logType.toUpperCase();
   if (startSeq || endSeq) {
     where.seq = {};
@@ -137,6 +139,13 @@ export async function getLogs(req: Request, res: Response) {
         ipAddress: true,
         userAgent: true,
         createdAt: true,
+        application: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+          },
+        },
       },
     }),
   ]);
@@ -153,6 +162,7 @@ export async function getLogs(req: Request, res: Response) {
       ip_address: log.ipAddress,
       user_agent: log.userAgent,
       created_at: log.createdAt,
+      application: log.application,
     })),
     pagination: {
       page,
@@ -164,30 +174,67 @@ export async function getLogs(req: Request, res: Response) {
 }
 
 export async function verifyChain(req: Request, res: Response) {
-  const apiKey = getApiKey(req);
-  if (!apiKey) return res.status(401).json({ success: false, message: "API Key is required" });
-
-  const application = await prisma.application.findFirst({
-    where: { apiKey, isActive: true },
-    select: { id: true, name: true },
-  });
-
-  if (!application) return res.status(401).json({ success: false, message: "Invalid or inactive API Key" });
+  // User sudah di-authenticate oleh JWT middleware
+  const user = (req as AuthRequest).user;
+  
+  if (!user) {
+    return res.status(401).json({ success: false, message: "Authentication required" });
+  }
 
   const secret = process.env.LOG_HASH_KEY;
   if (!secret) return res.status(500).json({ success: false, message: "LOG_HASH_KEY missing" });
 
-  const result = await hashSvc.verifyHashChain(application.id, secret, prisma);
+  // Optional: filter by application_id dari query
+  const applicationId = req.query.application_id as string | undefined;
 
-  return res.json({
-    success: true,
-    data: {
-      application_id: application.id,
-      application_name: application.name,
-      valid: result.valid,
-      total_logs: result.totalLogs,
-      first_invalid_seq: result.firstInvalidSeq?.toString(),
-      errors: result.errors,
-    },
-  });
+  if (applicationId) {
+    // Verify specific application
+    const application = await prisma.application.findUnique({
+      where: { id: applicationId },
+      select: { id: true, name: true, isActive: true },
+    });
+
+    if (!application) {
+      return res.status(404).json({ success: false, message: "Application not found" });
+    }
+
+    const result = await hashSvc.verifyHashChain(application.id, secret, prisma);
+
+    return res.json({
+      success: true,
+      data: {
+        application_id: application.id,
+        application_name: application.name,
+        valid: result.valid,
+        total_logs: result.totalLogs,
+        first_invalid_seq: result.firstInvalidSeq?.toString(),
+        errors: result.errors,
+      },
+    });
+  } else {
+    // Verify all applications
+    const applications = await prisma.application.findMany({
+      where: { isActive: true },
+      select: { id: true, name: true },
+    });
+
+    const results = await Promise.all(
+      applications.map(async (app: { id: string; name: string }) => {
+        const result = await hashSvc.verifyHashChain(app.id, secret, prisma);
+        return {
+          application_id: app.id,
+          application_name: app.name,
+          valid: result.valid,
+          total_logs: result.totalLogs,
+          first_invalid_seq: result.firstInvalidSeq?.toString(),
+          errors: result.errors,
+        };
+      })
+    );
+
+    return res.json({
+      success: true,
+      data: results,
+    });
+  }
 }
