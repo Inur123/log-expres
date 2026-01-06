@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model Application {
+  id       String  @id @db.Uuid
+  name     String
+  slug     String  @unique
+  apiKey   String  @unique @map("api_key")
+
+  domain   String?
+  stack    String  @default("other")
+  isActive Boolean @default(true) @map("is_active")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  logs UnifiedLog[]
+
+  @@index([isActive, slug])
+  @@map("applications")
+}
+
+model UnifiedLog {
+  id            String   @id @db.Uuid
+  applicationId String   @db.Uuid @map("application_id")
+
+  seq           BigInt
+  logType       String   @map("log_type")
+  payload       Json
+
+  hash          String
+  prevHash      String?  @map("prev_hash")
+
+  ipAddress     String?  @map("ip_address")
+  userAgent     String?  @map("user_agent")
+
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  application Application @relation(fields: [applicationId], references: [id], onDelete: Cascade)
+
+  @@unique([applicationId, seq])
+  @@index([applicationId, seq])
+  @@index([applicationId, createdAt])
+  @@index([logType])
+  @@index([hash])
+  @@map("unified_logs")
+}
