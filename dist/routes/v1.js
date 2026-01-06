@@ -408,6 +408,53 @@ r.post("/logs", apiKeyMiddleware_1.requireApiKey, logController_1.store);
 r.get("/logs", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, logController_1.getLogs);
 /**
  * @openapi
+ * /api/v1/logs/{id}:
+ *   get:
+ *     tags: [Logs]
+ *     summary: Get log details by ID - Requires JWT Token
+ *     security:
+ *       - BearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: Log ID
+ *     responses:
+ *       200:
+ *         description: Log details retrieved
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id: { type: string }
+ *                     seq: { type: string }
+ *                     log_type: { type: string }
+ *                     payload: { type: object }
+ *                     hash: { type: string }
+ *                     prev_hash: { type: string }
+ *                     ip_address: { type: string }
+ *                     user_agent: { type: string }
+ *                     created_at: { type: string, format: date-time }
+ *                     application:
+ *                       type: object
+ *                       properties:
+ *                         id: { type: string }
+ *                         name: { type: string }
+ *                         slug: { type: string }
+ *                         domain: { type: string }
+ *                         stack: { type: string }
+ *       404:
+ *         description: Log not found
+ */
+r.get("/logs/:id", authMiddleware_1.authenticate, rbacMiddleware_1.requireAuditorOrAdmin, logController_1.getLogById);
+/**
+ * @openapi
  * /api/v1/logs/verify-chain:
  *   get:
  *     tags: [Logs]

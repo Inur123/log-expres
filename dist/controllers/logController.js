@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.store = store;
 exports.getLogs = getLogs;
+exports.getLogById = getLogById;
 exports.verifyChain = verifyChain;
 const crypto_1 = __importDefault(require("crypto"));
 const prismaClient_1 = require("../prismaClient");
@@ -154,6 +155,58 @@ async function getLogs(req, res) {
             limit,
             total,
             total_pages: Math.ceil(total / limit),
+        },
+    });
+}
+async function getLogById(req, res) {
+    // User sudah di-authenticate oleh JWT middleware
+    const user = req.user;
+    if (!user) {
+        return res.status(401).json({ success: false, message: "Authentication required" });
+    }
+    const { id } = req.params;
+    const log = await prismaClient_1.prisma.unifiedLog.findUnique({
+        where: { id },
+        select: {
+            id: true,
+            seq: true,
+            logType: true,
+            payload: true,
+            hash: true,
+            prevHash: true,
+            ipAddress: true,
+            userAgent: true,
+            createdAt: true,
+            application: {
+                select: {
+                    id: true,
+                    name: true,
+                    slug: true,
+                    domain: true,
+                    stack: true,
+                },
+            },
+        },
+    });
+    if (!log) {
+        return res.status(404).json({
+            success: false,
+            message: "Log not found"
+        });
+    }
+    return res.json({
+        success: true,
+        data: {
+            id: log.id,
+            seq: log.seq.toString(),
+            log_type: log.logType,
+            payload: log.payload,
+            hash: log.hash,
+            prev_hash: log.prevHash,
+            ip_address: log.ipAddress,
+            user_agent: log.userAgent,
+            created_at: log.createdAt,
+            application: log.application,
         },
     });
 }
