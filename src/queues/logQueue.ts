@@ -1,11 +1,10 @@
 import { Queue } from "bullmq";
-import IORedis from "ioredis";
 
-const connection = new IORedis({
+const connectionOptions = {
   host: process.env.REDIS_HOST || "localhost",
   port: parseInt(process.env.REDIS_PORT || "6379"),
   maxRetriesPerRequest: null,
-});
+};
 
 export interface LogJobData {
   applicationId: string;
@@ -16,7 +15,7 @@ export interface LogJobData {
 }
 
 export const logQueue = new Queue<LogJobData>("log-processing", {
-  connection,
+  connection: connectionOptions,
   defaultJobOptions: {
     attempts: 3,
     backoff: {

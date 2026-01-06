@@ -1,15 +1,14 @@
 import { Worker, Job } from "bullmq";
-import IORedis from "ioredis";
 import crypto from "crypto";
 import { prisma } from "../prismaClient";
 import { HashChainService } from "../services/hashChainService";
 import { LogJobData } from "../queues/logQueue";
 
-const connection = new IORedis({
+const connectionOptions = {
   host: process.env.REDIS_HOST || "localhost",
   port: parseInt(process.env.REDIS_PORT || "6379"),
   maxRetriesPerRequest: null,
-});
+};
 
 const hashSvc = new HashChainService();
 
@@ -76,7 +75,7 @@ const worker = new Worker<LogJobData>(
     };
   },
   {
-    connection,
+    connection: connectionOptions,
     concurrency: 5, // Process 5 jobs concurrently
     limiter: {
       max: 100, // Max 100 jobs
