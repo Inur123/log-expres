@@ -34,12 +34,12 @@ export async function storeWithQueue(req: Request, res: Response) {
   }
 
   // Add job to queue
-  const job = await logQueue.add("process-log", {
+  const job = await logQueue.add("log-processing", {
     applicationId: application.id,
     logType,
     payload,
-    ipAddress: req.ip,
-    userAgent: req.get("user-agent"),
+    ipAddress: req.ip || undefined,
+    userAgent: req.get("user-agent") || undefined,
   });
 
   return res.status(202).json({

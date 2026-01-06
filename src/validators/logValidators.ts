@@ -32,9 +32,9 @@ export const baseLogSchema = z.object({
     .toUpperCase()
     .refine(
       (val) => isAllowedLogType(val),
-      (val) => ({
-        message: `Invalid log_type: "${val}". Allowed types: ${allowedLogTypes.join(", ")}`,
-      })
+      {
+        message: `Invalid log_type. Allowed types: ${allowedLogTypes.join(", ")}`,
+      }
     ),
   payload: z.any().default({}),
 });

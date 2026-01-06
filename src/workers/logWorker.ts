@@ -26,7 +26,7 @@ const worker = new Worker<LogJobData>(
     }
 
     // Process in transaction with proper locking
-    const created = await prisma.$transaction(async (tx) => {
+    const created = await prisma.$transaction(async (tx: any) => {
       // Lock with FOR UPDATE to prevent race conditions
       const last = await tx.$queryRaw<Array<{ seq: bigint; hash: string }>>`
         SELECT seq, hash 

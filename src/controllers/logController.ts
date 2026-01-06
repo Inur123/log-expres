@@ -143,7 +143,7 @@ export async function getLogs(req: Request, res: Response) {
 
   return res.json({
     success: true,
-    data: logs.map((log) => ({
+    data: logs.map((log: any) => ({
       id: log.id,
       seq: log.seq.toString(),
       log_type: log.logType,
